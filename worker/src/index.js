@@ -106,23 +106,52 @@ async function enabledInboundIds(env) {
   return ids;
 }
 
-async function cryptoBot(env, method, params = {}) {
-  let res;
-  try {
-    res = await fetch('https://api.crypto.bot/api/' + method, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'crypto-pay-api-token': env.CRYPTOBOT_TOKEN || '' },
-      body: JSON.stringify(params),
-      signal: AbortSignal.timeout(15000),
-    });
-  } catch (e) {
-    return { ok: false, error: 'crypto.bot unreachable: ' + (e && e.message ? e.message : e) };
+function cryptoBotBases(env) {
+  const bases = [];
+  if (env.CRYPTOBOT_API) bases.push(env.CRYPTOBOT_API.replace(/\/+$/, ''));
+  for (const b of ['https://api.crypto.bot/api', 'https://api.cryptobot.ru/api']) {
+    if (!bases.includes(b)) bases.push(b);
   }
-  const text = await res.text();
-  const data = parseJson(text, null);
-  if (!data) return { ok: false, error: 'crypto.bot: non-JSON response HTTP ' + res.status };
-  if (!data.ok) return { ok: false, error: (data.error && (data.error.message || data.error.code)) || 'crypto.bot error' };
-  return { ok: true, result: data.result };
+  return bases;
+}
+
+async function cryptoBot(env, method, params = {}) {
+  const errors = [];
+  for (const base of cryptoBotBases(env)) {
+    let res;
+    try {
+      res = await fetch(base + '/' + method, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'crypto-pay-api-token': env.CRYPTOBOT_TOKEN || '',
+          accept: 'application/json',
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        },
+        body: JSON.stringify(params),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (e) {
+      errors.push(base + ' unreachable: ' + (e && e.message ? e.message : e));
+      continue;
+    }
+    if (res.status >= 520 && res.status <= 526) {
+      const body = await res.text().catch(() => '');
+      errors.push(base + ' HTTP ' + res.status + ': ' + body.slice(0, 200));
+      continue;
+    }
+    const text = await res.text();
+    const data = parseJson(text, null);
+    if (!data) {
+      errors.push(base + ': non-JSON HTTP ' + res.status + ': ' + text.slice(0, 160));
+      continue;
+    }
+    if (!data.ok) {
+      return { ok: false, error: (data.error && (data.error.message || data.error.code)) || base + ' error' };
+    }
+    return { ok: true, result: data.result };
+  }
+  return { ok: false, error: errors.join(' | ') || 'crypto.bot: no endpoint answered' };
 }
 
 async function usdRate(env) {

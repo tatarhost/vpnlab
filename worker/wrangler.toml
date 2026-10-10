@@ -6,7 +6,7 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "vpnlab"
-database_id = "PLACEHOLDER_RUN_db_create"
+database_id = "4b6bba1b-4b72-4d51-837f-ed757eed7541"
 migrations_dir = "migrations"
 
 [vars]
