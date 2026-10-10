@@ -46,6 +46,7 @@ const PANEL_URL = 'http://panel.test';
 const CRYPTO = 'https://pay.crypt.bot';
 
 let cryptoState = { paid: false, invoices: true, lastPayload: null };
+let coingeckoDown = false;
 
 function paySignature(token, raw) {
   const secret = createHash('sha256').update(token).digest();
@@ -96,6 +97,15 @@ function mockFetch() {
         return J({ ok: true, result: [{ invoice_id: 42, payload: cryptoState.lastPayload, status: cryptoState.paid ? 'paid' : 'active' }] });
       }
       return J({ ok: false, error: { message: 'unknown crypto route' } }, 404);
+    }
+
+    if (u.origin === 'https://api.coingecko.com') {
+      if (coingeckoDown) return J({ error: 'rate limited' }, 429);
+      return J({ tether: { rub: 95 } });
+    }
+
+    if (u.origin === 'https://yobit.net') {
+      return J({ usdt_rur: { last: 96 } });
     }
 
     if (u.origin === 'https://www.cbr-xml-daily.ru') {
@@ -150,18 +160,16 @@ test('tariffs are served from the TARIFFS var', async () => {
   }
 });
 
-test('sbp order never leaks the phone and admin confirm delivers links', async () => {
+test('admin confirm delivers a pending order and public poll sees it', async () => {
   const restore = mockFetch();
   try {
     const e = env(freshDb());
-    const created = await (await worker.fetch(req('/api/orders', { method: 'POST', body: { tariff: 'm3', method: 'sbp' } }), e)).json();
-    assert.equal(created.ok, true);
-    assert.equal(created.order.method, 'sbp');
+    const created = await (await worker.fetch(req('/api/orders', { method: 'POST', body: { tariff: 'm3' } }), e)).json();
+    assert.equal(created.order.method, 'cryptobot');
     assert.equal(created.order.status, 'pending');
     assert.match(created.order.short, /^VL-[A-F0-9]{6}$/);
-    assert.ok(created.order.sbp.qr_svg.includes('<svg'));
-    assert.equal(created.order.sbp.comment, created.order.short);
-    assert.ok(!created.order.sbp.qr_svg.includes('9048269897'), 'qr svg must not contain the phone');
+    assert.equal(created.order.invoice_url, 'https://pay.test/inv');
+    assert.ok(!JSON.stringify(created.order).includes('9048269897'), 'no phone anywhere in the api');
 
     const denied = await (await worker.fetch(req('/api/admin/confirm', { method: 'POST', body: { id: created.order.id } }), e)).json();
     assert.equal(denied.ok, false);
@@ -175,12 +183,6 @@ test('sbp order never leaks the phone and admin confirm delivers links', async (
     const polled = await (await worker.fetch(req('/api/orders/' + created.order.id), e)).json();
     assert.equal(polled.order.status, 'delivered');
     assert.equal(polled.order.links.length, 2);
-
-    // The phone stays off the page; it is only handed out on an explicit
-    // request keyed by the secret order id.
-    const phone = await (await worker.fetch(req('/api/orders/' + created.order.id + '/phone'), e)).json();
-    assert.equal(phone.ok, true);
-    assert.equal(phone.phone, '+79048269897');
   } finally {
     restore();
   }
@@ -193,7 +195,7 @@ test('cryptobot order settles through the verified invoice status and delivers',
     const e = env(freshDb());
     const created = await (await worker.fetch(req('/api/orders', { method: 'POST', body: { tariff: 'm1', method: 'cryptobot' } }), e)).json();
     assert.equal(created.order.method, 'cryptobot');
-    assert.equal(created.order.usdt, '1.17'); // 100 * 1.05 / 90 rounded up
+    assert.equal(created.order.usdt, '1.11'); // 100 * 1.05 / 95 (market rate) rounded up
     assert.equal(created.order.invoice_url, 'https://pay.test/inv');
 
     const pending = await (await worker.fetch(req('/api/orders/' + created.order.id), e)).json();
@@ -243,7 +245,7 @@ test('rate limit kicks in per ip', async () => {
     e.RATE_LIMIT = '2';
     let last;
     for (let i = 0; i < 3; i++) {
-      last = await worker.fetch(req('/api/orders', { method: 'POST', body: { tariff: 'm1', method: 'sbp' } }), e);
+      last = await worker.fetch(req('/api/orders', { method: 'POST', body: { tariff: 'm1' } }), e);
     }
     assert.equal(last.status, 429);
   } finally {
@@ -265,30 +267,33 @@ test('admin list requires the token', async () => {
   }
 });
 
-test('qr svg renders a scannable-looking matrix for the phone payload', async () => {
-  const { qrcode } = await import(pathToFileURL(join(HERE, '..', 'src', 'qrcode.mjs')).href);
-  const qr = qrcode(0, 'M');
-  qr.addData('+79048269897');
-  qr.make();
-  const count = qr.getModuleCount();
-  assert.ok(count >= 21, 'qr has at least version 1 size');
-  assert.equal(qr.isDark(0, 0), true, 'finder pattern corner is dark');
-  assert.equal(qr.isDark(0, 7), false, 'quiet separator around finder is light');
-});
-
-test('rates expose the usdt price per tariff with 6 decimals', async () => {
+test('rates use the market usdt price with 6 decimals', async () => {
   const restore = mockFetch();
   try {
     const res = await worker.fetch(req('/api/rates'), env(freshDb()));
     const data = await res.json();
     assert.equal(res.status, 200);
-    assert.equal(data.usd_rub, 90);
+    assert.equal(data.rate, 95);
+    assert.equal(data.source, 'coingecko');
     assert.equal(data.markup, 1.05);
     const m1 = data.samples.find((s) => s.id === 'm1');
-    assert.equal(m1.usdt, '1.166667'); // 100 * 1.05 / 90
+    assert.equal(m1.usdt, '1.105263'); // 100 * 1.05 / 95
     const m3 = data.samples.find((s) => s.id === 'm3');
-    assert.equal(m3.usdt, '3.500000'); // 300 * 1.05 / 90
+    assert.equal(m3.usdt, '3.315789'); // 300 * 1.05 / 95
   } finally {
+    restore();
+  }
+});
+
+test('rates fall back to yobit when coingecko is down', async () => {
+  const restore = mockFetch();
+  try {
+    coingeckoDown = true;
+    const data = await (await worker.fetch(req('/api/rates'), env(freshDb()))).json();
+    assert.equal(data.rate, 96);
+    assert.equal(data.source, 'yobit');
+  } finally {
+    coingeckoDown = false;
     restore();
   }
 });
@@ -332,7 +337,7 @@ test('trial is blocked while a paid subscription from the same ip is live', asyn
   const restore = mockFetch();
   try {
     const e = env(freshDb());
-    const created = await (await worker.fetch(req('/api/orders', { method: 'POST', body: { tariff: 'm1', method: 'sbp' } }), e)).json();
+    const created = await (await worker.fetch(req('/api/orders', { method: 'POST', body: { tariff: 'm1' } }), e)).json();
     await worker.fetch(req('/api/admin/confirm', { method: 'POST', body: { id: created.order.id }, headers: { 'x-admin-token': 'admin-secret' } }), e);
 
     const blocked = await worker.fetch(req('/api/trial', { method: 'POST' }), e);

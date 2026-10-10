@@ -1,5 +1,3 @@
-import qrcode from './qrcode.mjs';
-
 const TEXT = { 'content-type': 'application/json; charset=utf-8' };
 
 function json(data, status = 200) {
@@ -153,35 +151,71 @@ async function cryptoBot(env, method, params = {}) {
   return { ok: false, error: errors.join(' | ') || 'crypto.bot: no endpoint answered' };
 }
 
-async function usdRate(env) {
-  const cached = await kvGet(env, 'usd_rate');
-  if (cached && typeof cached === 'object' && Date.now() - cached.ts < 12 * 3600 * 1000) return cached.rate;
+// The price a buyer actually pays for USDT on the market, not the official
+// CBR rate — they diverge by several percent and the invoice has to match what
+// an exchange really charges. Several public sources, CBR only as a fallback.
+const MARKET_SOURCES = [
+  {
+    name: 'coingecko',
+    url: 'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub',
+    pick: (d) => d && d.tether && d.tether.rub,
+  },
+  {
+    name: 'yobit',
+    url: 'https://yobit.net/api/3/ticker/usdt_rur',
+    pick: (d) => d && d.usdt_rur && d.usdt_rur.last,
+  },
+];
+
+async function usdtRate(env) {
+  const cached = await kvGet(env, 'usdt_rate');
+  if (cached && typeof cached === 'object' && Date.now() - cached.ts < 3600 * 1000) return cached;
+  const errors = [];
+  for (const src of MARKET_SOURCES) {
+    try {
+      const res = await fetch(src.url, {
+        headers: { accept: 'application/json', 'user-agent': 'vpnlab/1.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      const text = await res.text();
+      const rate = src.pick(parseJson(text, null));
+      if (rate && isFinite(rate) && rate > 0) {
+        const out = { rate, source: src.name, ts: Date.now() };
+        await kvSet(env, 'usdt_rate', out);
+        return out;
+      }
+      errors.push(src.name + ': http ' + res.status + ' ' + text.slice(0, 100));
+    } catch (e) {
+      errors.push(src.name + ': ' + (e && e.message ? e.message : e));
+    }
+  }
+  const cbr = await kvGet(env, 'usd_rate');
+  if (cbr && typeof cbr === 'object' && Date.now() - cbr.ts < 12 * 3600 * 1000) {
+    return { rate: cbr.rate, source: 'cbr', ts: Date.now(), errors };
+  }
   try {
     const res = await fetch('https://www.cbr-xml-daily.ru/daily_json.js', { signal: AbortSignal.timeout(8000) });
     const data = await res.json();
     const rate = data && data.Valute && data.Valute.USD && data.Valute.USD.Value;
     if (rate) {
       await kvSet(env, 'usd_rate', { rate, ts: Date.now() });
-      return rate;
+      return { rate, source: 'cbr', ts: Date.now(), errors };
     }
-  } catch {}
-  return parseFloat(env.USD_FALLBACK || '90');
+  } catch (e) {
+    errors.push('cbr: ' + (e && e.message ? e.message : e));
+  }
+  return { rate: parseFloat(env.USD_FALLBACK || '90'), source: 'fallback', ts: 0, errors };
+}
+
+function usdtExact(rub, rate, markup) {
+  return Math.max((rub * markup) / rate, 0).toFixed(6);
 }
 
 async function usdtAmount(env, rub) {
-  const rate = await usdRate(env);
+  const { rate } = await usdtRate(env);
   const markup = parseFloat(env.USDT_MARKUP || '1.05');
   const usdt = Math.ceil(((rub * markup) / rate) * 100) / 100;
   return Math.max(usdt, 1).toFixed(2);
-}
-
-function sbpSvg(env) {
-  const phone = (env.SBP_PHONE || '').trim();
-  if (!phone) return null;
-  const qr = qrcode(0, 'M');
-  qr.addData(phone);
-  qr.make();
-  return qr.createSvgTag(4, 4);
 }
 
 function publicOrder(env, o) {
@@ -196,8 +230,7 @@ function publicOrder(env, o) {
     tariff: { id: o.tariff_id, label: o.tariff_label },
     created_at: o.created_at,
   };
-  if (o.method === 'cryptobot') out.invoice_url = o.status === 'pending' ? o.invoice_url : null;
-  if (o.method === 'sbp') out.sbp = { comment: o.short, qr_svg: sbpSvg(env) };
+  if (o.status === 'pending') out.invoice_url = o.invoice_url;
   if (o.status === 'delivered') {
     out.sub_url = o.sub_url || null;
     out.links = parseJson(o.links, []);
@@ -305,7 +338,7 @@ function clientIp(req) {
 async function createOrder(env, req, body) {
   const tariff = tariffs(env).find((t) => t.id === (body && body.tariff));
   if (!tariff) return fail('Тариф не найден', 404);
-  const method = body.method === 'sbp' ? 'sbp' : 'cryptobot';
+  const method = 'cryptobot';
   const ip = clientIp(req);
   if (!(await rateLimited(env, ip))) return fail('Слишком много запросов, попробуйте позже', 429);
 
@@ -384,16 +417,16 @@ const TRIAL_SECONDS = 1200;
 const TRIAL_GB = 1;
 
 async function ratesPayload(env) {
-  const rate = await usdRate(env);
+  const { rate, source } = await usdtRate(env);
   const markup = parseFloat(env.USDT_MARKUP || '1.05');
   const samples = tariffs(env).map((t) => ({
     id: t.id,
     label: t.label,
     days: t.days,
     rub: t.rub,
-    usdt: Math.max((t.rub * markup) / rate, 0).toFixed(6),
+    usdt: usdtExact(t.rub, rate, markup),
   }));
-  return { usd_rub: rate, markup, samples };
+  return { rate, source, markup, samples };
 }
 
 function publicTrial(row) {
@@ -505,7 +538,6 @@ async function handle(req, env) {
       tariffs: tariffs(env).length > 0,
       cryptobot: !!env.CRYPTOBOT_TOKEN,
       panel: !!env.PANEL_TOKEN,
-      sbp: !!env.SBP_PHONE,
       admin: !!env.ADMIN_TOKEN,
     });
   }
@@ -533,14 +565,7 @@ async function handle(req, env) {
   }
 
   if (req.method === 'GET' && path.startsWith('/api/orders/')) {
-    const orderId = path.slice('/api/orders/'.length);
-    if (orderId.endsWith('/phone')) {
-      const order = await getOrder(env, orderId.slice(0, -('/phone'.length)));
-      if (!order || order.method !== 'sbp') return fail('Заказ не найден', 404);
-      if (!env.SBP_PHONE) return fail('СБП временно недоступен', 503);
-      return json({ ok: true, phone: env.SBP_PHONE });
-    }
-    return readOrder(env, orderId);
+    return readOrder(env, path.slice('/api/orders/'.length));
   }
 
   if (req.method === 'POST' && path === '/api/webhook/cryptobot') {

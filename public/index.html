@@ -9,8 +9,8 @@
      correctly from any depth. Deploy under a domain root instead? Delete. -->
 <base href="/vpnlab/">
 
-<title>VPNLAB — VPN-подписка с оплатой криптой и СБП</title>
-<meta name="description" content="VPNLAB — подписка на быстрый VPN: VLESS + Reality. Оплата через CryptoBot или СБП. Клиент и ключи выдаются автоматически после оплаты.">
+<title>VPNLAB — VPN-подписка с оплатой криптой</title>
+<meta name="description" content="VPNLAB — подписка на быстрый VPN: VLESS + Reality. Оплата USDT через CryptoBot. Клиент и ключи выдаются автоматически после оплаты.">
 
 <!-- API origin. Empty means same origin. Set the workers.dev URL with
      `node scripts/set-api-url.mjs <url>` once the Worker is deployed. -->
@@ -18,8 +18,8 @@
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="VPNLAB">
-<meta property="og:title" content="VPNLAB — VPN-подписка с оплатой криптой и СБП">
-<meta property="og:description" content="VLESS + Reality. Оплата криптой или СБП, ключи приходят автоматически.">
+<meta property="og:title" content="VPNLAB — VPN-подписка с оплатой криптой">
+<meta property="og:description" content="VLESS + Reality. Оплата USDT через CryptoBot, ключи приходят автоматически.">
 <meta name="theme-color" content="#0b0b0b">
 <link rel="icon" href="assets/logo.png">
 <script>
@@ -28,8 +28,8 @@
     if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
   } catch (e) {}
 </script>
-<link rel="stylesheet" href="style.css?v=2">
-<script src="app.js?v=2" defer></script>
+<link rel="stylesheet" href="style.css?v=3">
+<script src="app.js?v=3" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -50,7 +50,7 @@
     <section id="view-catalog">
       <div class="hero">
         <h1>VPN-подписка<br>за пару минут</h1>
-        <p class="lead">VLESS + Reality, безлимитный трафик. Оплата криптой или СБП.
+        <p class="lead">VLESS + Reality, безлимитный трафик. Оплата USDT через CryptoBot.
         Клиент с рабочими ключами выдаётся автоматически сразу после оплаты — прямо на этой странице.</p>
       </div>
 
@@ -69,16 +69,11 @@
       </div>
 
       <h2 class="section-title">Как оплатить</h2>
-      <div class="tabs" id="pay-tabs" role="tablist">
-        <button class="tab active" data-tab="crypto" type="button" role="tab">CryptoBot</button>
-        <button class="tab" data-tab="sbp" type="button" role="tab">СБП</button>
-      </div>
-
       <div class="tab-panel rise" data-panel="crypto">
         <ol class="steps">
-          <li><b>Купите USDT</b> на любой бирже с P2P (Bybit, OKX и т.п.) — на тариф нужно <b id="usdt-hint">≈ 1.07 USDT</b>.
-          Точный расчёт смотрите в таблице и калькуляторе ниже.</li>
-          <li>Вернитесь на сайт и нажмите <b>CryptoBot</b> на нужном тарифе — откроется счёт в Telegram.</li>
+          <li><b>Купите USDT</b> на любой бирже с P2P (Bybit, OKX и т.п.) — на тариф нужно <b id="usdt-hint">≈ 1.1 USDT</b>.
+          Сколько это в рублях — показывает калькулятор ниже (считаем по текущему рыночному курсу USDT).</li>
+          <li>Нажмите <b>Оплатить</b> на нужном тарифе — откроется счёт в Telegram с точной суммой.</li>
           <li>Оплатите счёт кнопкой Pay. <b>Ключи появятся на этой же странице автоматически</b> — можно ничего не делать, просто подождать.</li>
         </ol>
         <div class="calc">
@@ -87,7 +82,7 @@
           </label>
           <div class="calc-result">
             ≈ <b id="calc-usdt">…</b> USDT
-            <small class="mute" id="calc-note">курс ЦБ загружается…</small>
+            <small class="mute" id="calc-note">курс загружается…</small>
           </div>
         </div>
         <div class="rates-wrap">
@@ -96,17 +91,6 @@
             <tbody><tr><td colspan="3" class="mute">Загружаем курс…</td></tr></tbody>
           </table>
         </div>
-      </div>
-
-      <div class="tab-panel rise" data-panel="sbp" hidden>
-        <ol class="steps">
-          <li>Нажмите <b>СБП</b> на нужном тарифе — откроется страница платежа с QR-кодом.</li>
-          <li>Отсканируйте QR <b>камерой телефона</b> или через «Платежи → QR» в приложении банка.
-          Номер получателя на сайте не показывается — он зашит в QR.</li>
-          <li>Введите точную сумму и комментарий <b>VL-XXXXXX</b> со страницы платежа — без комментария перевод не опознаётся.</li>
-          <li>После подтверждения (обычно до 2 минут) ключи появятся на странице.
-          Если камера не читает QR — на странице платежа есть кнопка «Показать номер».</li>
-        </ol>
       </div>
 
       <h2 class="section-title">Как это работает</h2>
@@ -120,8 +104,8 @@
           <p>Hiddify, v2rayN, Streisand, NekoBox, Karing — любой клиент с поддержкой VLESS / Reality. Ссылку и подписку можно скопировать в один клик.</p>
         </div>
         <div class="faq-item">
-          <h3>Почему при оплате СБП нет номера?</h3>
-          <p>Номер не показывается на сайте: сканируйте QR камерой приложения банка. Сумма и комментарий к переводу отдельно на странице.</p>
+          <h3>Как быстро приходят ключи?</h3>
+          <p>Сразу после подтверждения оплаты — обычно меньше минуты. Если закрыли вкладку, вернитесь по ссылке из адресной строки: доступ там сохраняется.</p>
         </div>
       </div>
     </section>
@@ -132,6 +116,7 @@
         К тарифам
       </button>
       <div class="order-head">
+        <div class="status-anim" id="o-anim" data-state="" hidden aria-hidden="true"></div>
         <span class="badge" id="o-status"></span>
         <h1 id="o-title"></h1>
         <p class="mute" id="o-sub"></p>
@@ -142,7 +127,7 @@
   </main>
 
   <footer class="foot">
-    <span>VPNLAB · оплата через CryptoBot и СБП · ключи выдаются автоматически</span>
+    <span>VPNLAB · оплата USDT через CryptoBot · ключи выдаются автоматически</span>
   </footer>
 
 </div>

@@ -59,13 +59,41 @@
     }
     if (btn) {
       const old = btn.textContent;
-      btn.textContent = 'скопировано';
-      setTimeout(() => { btn.textContent = old; }, 1400);
+      btn.textContent = '✓ скопировано';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 1400);
     }
   }
 
   function copyRow(text, label) {
     return `<div class="copy-row"><code title="${esc(label)}">${esc(text)}</code><button class="copy-btn" data-copy="${esc(text)}" type="button">копировать</button></div>`;
+  }
+
+  // ---- payment status animation: loader spins, then draws a checkmark or a
+  // cross. The element lives in the order header so polls never replay it.
+
+  const ANIM = {
+    spin: '',
+    check: '<svg class="anim-svg" viewBox="0 0 52 52" aria-hidden="true"><circle class="anim-circle" cx="26" cy="26" r="24"/><path class="anim-check" fill="none" d="M15 27l8 8 15-15"/></svg>',
+    cross: '<svg class="anim-svg" viewBox="0 0 52 52" aria-hidden="true"><circle class="anim-circle" cx="26" cy="26" r="24"/><path class="anim-x" fill="none" d="M18 18l16 16M34 18L18 34"/></svg>',
+  };
+  const STATUS_ANIM = { pending: 'spin', paid: 'spin', delivering: 'spin', delivered: 'check', expired: 'cross' };
+
+  function setAnim(state) {
+    const el = document.getElementById('o-anim');
+    if (!el || el.dataset.state === state) return;
+    el.dataset.state = state;
+    el.hidden = false;
+    el.innerHTML = ANIM[state] || '';
+  }
+
+  function resetAnim() {
+    const el = document.getElementById('o-anim');
+    if (el) {
+      el.dataset.state = '';
+      el.hidden = true;
+      el.innerHTML = '';
+    }
   }
 
   function flashError(msg) {
@@ -98,8 +126,7 @@
           <div class="card-price">${money(t.rub)}</div>
           <div class="card-note">безлимитный трафик · ${esc(t.days)} дней</div>
           <div class="card-buy">
-            <button class="btn" data-t="${esc(t.id)}" data-m="cryptobot" type="button">CryptoBot</button>
-            <button class="btn ghost" data-t="${esc(t.id)}" data-m="sbp" type="button">СБП</button>
+            <button class="btn" data-t="${esc(t.id)}" data-m="cryptobot" type="button">Оплатить CryptoBot</button>
           </div>
         </article>`,
         )
@@ -161,6 +188,7 @@
     try { history.replaceState(null, '', '?t=' + t.id); } catch {}
     viewCatalog.hidden = true;
     viewOrder.hidden = false;
+    resetAnim();
     renderTrial();
     startTicking();
     window.scrollTo({ top: 0 });
@@ -188,6 +216,7 @@
     oStatus.className = 'badge ' + (t.status === 'active' ? 'ok' : 'bad');
     oTitle.textContent = 'VPN на 20 минут · 1 ГБ';
     oSub.textContent = 'бесплатно · без оплаты';
+    setAnim(t.status === 'active' ? 'check' : 'cross');
 
     if (t.status !== 'active') {
       oBody.innerHTML = `
@@ -229,6 +258,7 @@
     } catch {}
     viewCatalog.hidden = true;
     viewOrder.hidden = false;
+    resetAnim();
     renderOrder();
     schedulePoll();
     window.scrollTo({ top: 0 });
@@ -273,6 +303,7 @@
     oStatus.className = 'badge ' + st.cls;
     oTitle.textContent = o.tariff.label + ' · ' + money(o.rub);
     oSub.textContent = 'заказ ' + o.short;
+    setAnim(STATUS_ANIM[o.status] || 'spin');
 
     // The poll rewrites only when something actually changed, so entrance
     // animations do not replay every four seconds.
@@ -293,23 +324,7 @@
       document.getElementById('to-catalog').addEventListener('click', showCatalog);
       return;
     }
-    if (o.method === 'sbp') {
-      oBody.innerHTML = renderSbp(o);
-      document.getElementById('reveal-phone')?.addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        try {
-          const data = await api('/api/orders/' + o.id + '/phone');
-          btn.parentElement.insertAdjacentHTML('beforeend', `<span class="phone-box">${esc(data.phone)}</span>`);
-          btn.remove();
-        } catch (err) {
-          btn.textContent = err.message;
-          btn.disabled = false;
-        }
-      });
-    } else {
-      oBody.innerHTML = renderCrypto(o);
-    }
+    oBody.innerHTML = renderCrypto(o);
     document.getElementById('open-crypto')?.addEventListener('click', () => {
       if (o.invoice_url) window.open(o.invoice_url, '_blank', 'noopener');
     });
@@ -327,26 +342,6 @@
           <button class="btn ghost" id="refresh-status" type="button">Проверить статус</button>
         </div>
         <div class="status-line"><span class="spinner" aria-hidden="true"></span> статус обновляется автоматически</div>
-      </div>`;
-  }
-
-  function renderSbp(o) {
-    const sbp = o.sbp || {};
-    return `
-      <div class="panel rise">
-        <div class="pay-amount">${money(o.rub)}</div>
-        <p class="pay-note">Отсканируйте QR камерой телефона или через «Платежи → QR» в приложении банка.
-        Номер на сайте не показывается — он зашит в QR.</p>
-        ${sbp.qr_svg ? `<div class="qr">${sbp.qr_svg}</div>` : ''}
-        <p class="pay-note">Сумма: <b>${money(o.rub)}</b> · комментарий к переводу:</p>
-        ${copyRow(sbp.comment || o.short, 'комментарий')}
-        <div class="reveal-row">
-          <button class="ghost" id="reveal-phone" type="button">QR не читается? Показать номер</button>
-        </div>
-        <div class="pay-actions">
-          <button class="btn ghost" id="refresh-status" type="button">Проверить статус</button>
-        </div>
-        <div class="status-line"><span class="spinner" aria-hidden="true"></span> подтверждение платежа обычно занимает пару минут</div>
       </div>`;
   }
 
@@ -384,9 +379,9 @@
     if (!rates) return;
     const rub = Math.max(1, parseFloat(calcRub.value) || 0);
     const markup = rates.markup || 1.05;
-    const rate = rates.usd_rub || 90;
+    const rate = rates.rate || 90;
     calcUsdt.textContent = ((rub * markup) / rate).toFixed(6);
-    calcNote.textContent = 'по курсу ЦБ ' + rates.usd_rub + ' ₽/$, с комиссией ' + Math.round((markup - 1) * 100) + '%';
+    calcNote.textContent = 'рыночный курс USDT ≈ ' + rate + ' ₽' + (rates.source === 'cbr' ? ' (курс ЦБ, запасной)' : '');
   }
 
   calcRub.addEventListener('input', updateCalc);

@@ -162,13 +162,6 @@ p { margin: 0; }
 .pay-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .pay-actions .btn { flex: 0 1 auto; min-width: 160px; }
 
-.qr {
-  display: flex; justify-content: center;
-  padding: 18px; margin: 16px 0 6px;
-  background: #fff; border-radius: 12px; border: 1px solid var(--line);
-}
-.qr svg { width: min(260px, 100%); height: auto; display: block; }
-
 .copy-row {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; margin-top: 10px;
@@ -277,11 +270,55 @@ p { margin: 0; }
   font-size: 13px; color: var(--mute); background: var(--paper);
 }
 
-.reveal-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
-.phone-box {
-  flex: 1; min-width: 200px; padding: 10px 12px;
-  border: 1px dashed var(--line); border-radius: 8px; background: var(--paper);
-  font: 15px var(--mono); letter-spacing: 0.04em;
+/* ---- payment status animation ---- */
+.status-anim {
+  display: flex; justify-content: center;
+  margin: 4px 0 16px;
+}
+.status-anim .anim-svg {
+  width: 76px; height: 76px;
+  animation: anim-pop 0.3s cubic-bezier(0.2, 0.8, 0.3, 1.4) both;
+}
+@keyframes anim-pop { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: none; } }
+
+.status-anim[data-state="spin"]::after {
+  content: '';
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--ink);
+  animation: spin 0.8s linear infinite;
+}
+
+.status-anim .anim-circle {
+  fill: none; stroke-width: 2.5;
+  stroke: var(--ink);
+  stroke-dasharray: 166.9;
+  stroke-dashoffset: 166.9;
+  animation: draw-circle 0.55s ease forwards;
+}
+.status-anim .anim-check {
+  stroke: var(--ink); stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: draw-path 0.35s 0.5s ease forwards;
+}
+.status-anim .anim-x {
+  stroke: var(--danger); stroke-width: 4.5; stroke-linecap: round;
+  stroke-dasharray: 56;
+  stroke-dashoffset: 56;
+  animation: draw-path 0.35s 0.5s ease forwards, nudge 0.35s 0.85s ease;
+}
+.status-anim[data-state="cross"] .anim-circle { stroke: var(--danger); }
+@keyframes draw-circle { to { stroke-dashoffset: 0; } }
+@keyframes draw-path { to { stroke-dashoffset: 0; } }
+@keyframes nudge {
+  0%, 100% { transform: translate(0, 0); }
+  30% { transform: translate(-2px, 1px); }
+  60% { transform: translate(2px, -1px); }
+}
+
+.copy-btn.copied {
+  border-color: var(--ink);
+  animation: pop 0.3s ease;
 }
 
 /* ---- animations ---- */

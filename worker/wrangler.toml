@@ -38,7 +38,6 @@ TRIAL_RATE_LIMIT = "5"
 # Secrets (npx wrangler secret put <NAME> --config wrangler.toml):
 #   CRYPTOBOT_TOKEN  — Crypto Pay API token (from @CryptoBot -> Crypto Pay)
 #   PANEL_TOKEN      — H1 panel Bearer token
-#   SBP_PHONE        — recipient phone, never sent to the browser
 #   ADMIN_TOKEN      — X-Admin-Token for /api/admin/*
 #
 # Optional var: CRYPTOBOT_API overrides the Crypto Pay base URL
