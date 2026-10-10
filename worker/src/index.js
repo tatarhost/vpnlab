@@ -59,10 +59,10 @@ async function kvSet(env, key, value) {
   ).bind(key, JSON.stringify(value), now()).run();
 }
 
-async function rateLimited(env, ip) {
-  const limit = parseInt(env.RATE_LIMIT || '10', 10);
+async function rateLimited(env, ip, limitOverride, prefix = 'rl') {
+  const limit = limitOverride || parseInt(env.RATE_LIMIT || '10', 10);
   const windowMs = 3600 * 1000;
-  const key = 'rl:' + (await hashKey(env, ip));
+  const key = prefix + ':' + (await hashKey(env, ip));
   const state = await kvGet(env, key);
   const ts = Date.now();
   let count = 1;
@@ -298,11 +298,15 @@ async function settle(env, order) {
   return (await getOrder(env, current.id)) || current;
 }
 
+function clientIp(req) {
+  return req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'local';
+}
+
 async function createOrder(env, req, body) {
   const tariff = tariffs(env).find((t) => t.id === (body && body.tariff));
   if (!tariff) return fail('Тариф не найден', 404);
   const method = body.method === 'sbp' ? 'sbp' : 'cryptobot';
-  const ip = req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'local';
+  const ip = clientIp(req);
   if (!(await rateLimited(env, ip))) return fail('Слишком много запросов, попробуйте позже', 429);
 
   const id = randHex(16);
@@ -349,10 +353,11 @@ async function createOrder(env, req, body) {
     if (!order.invoice_url) return fail('Crypto Pay не вернул ссылку на оплату', 502);
   }
 
+  const ipHash = await hashKey(env, ip);
   await env.DB.prepare(
-    'INSERT INTO orders (id, short, tariff_id, tariff_label, days, rub, method, status, usdt, invoice_id, invoice_url, client_name, sub_url, links, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO orders (id, short, tariff_id, tariff_label, days, rub, method, status, usdt, invoice_id, invoice_url, client_name, sub_url, links, created_at, updated_at, ip_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   )
-    .bind(order.id, order.short, order.tariff_id, order.tariff_label, order.days, order.rub, order.method, order.status, order.usdt, order.invoice_id, order.invoice_url, order.client_name, order.sub_url, order.links, order.created_at, order.updated_at)
+    .bind(order.id, order.short, order.tariff_id, order.tariff_label, order.days, order.rub, order.method, order.status, order.usdt, order.invoice_id, order.invoice_url, order.client_name, order.sub_url, order.links, order.created_at, order.updated_at, ipHash)
     .run();
 
   return json({ ok: true, order: publicOrder(env, order) });
@@ -370,6 +375,117 @@ async function readOrder(env, id) {
     }
   }
   return json({ ok: true, order: publicOrder(env, order) });
+}
+
+// Free trial: 20 minutes / 1 GB, issued at most TRIAL_MAX times per IP within
+// TRIAL_WINDOW_DAYS, and never while a paid subscription delivered to the same
+// IP is still running. The panel enforces the exact expiry through expires_at.
+const TRIAL_SECONDS = 1200;
+const TRIAL_GB = 1;
+
+async function ratesPayload(env) {
+  const rate = await usdRate(env);
+  const markup = parseFloat(env.USDT_MARKUP || '1.05');
+  const samples = tariffs(env).map((t) => ({
+    id: t.id,
+    label: t.label,
+    days: t.days,
+    rub: t.rub,
+    usdt: Math.max((t.rub * markup) / rate, 0).toFixed(6),
+  }));
+  return { usd_rub: rate, markup, samples };
+}
+
+function publicTrial(row) {
+  const t = now();
+  return {
+    id: row.id,
+    status: row.expires_at > t ? 'active' : 'expired',
+    expires_at: row.expires_at,
+    seconds: Math.max(0, row.expires_at - t),
+    traffic_gb: TRIAL_GB,
+    sub_url: row.sub_url || null,
+    links: parseJson(row.links, []),
+  };
+}
+
+async function createTrial(env, req) {
+  const ip = clientIp(req);
+  const ipHash = await hashKey(env, ip);
+  const t = now();
+  const max = parseInt(env.TRIAL_MAX || '2', 10);
+  const windowDays = parseInt(env.TRIAL_WINDOW_DAYS || '30', 10);
+
+  if (!(await rateLimited(env, ip, parseInt(env.TRIAL_RATE_LIMIT || '5', 10), 'rlt'))) {
+    return fail('Слишком много попыток, попробуйте позже', 429);
+  }
+
+  const active = await env.DB.prepare(
+    "SELECT id, short, created_at, days FROM orders WHERE ip_hash = ? AND status = 'delivered' AND created_at + days * 86400 > ? ORDER BY created_at DESC LIMIT 1",
+  )
+    .bind(ipHash, t)
+    .first();
+  if (active) {
+    const until = new Date((active.created_at + active.days * 86400) * 1000).toLocaleDateString('ru-RU');
+    return fail('Платная подписка действует до ' + until + ' — бесплатный доступ недоступен, пока она активна', 403);
+  }
+
+  const live = await env.DB.prepare(
+    "SELECT * FROM trials WHERE ip_hash = ? AND status = 'active' AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
+  )
+    .bind(ipHash, t)
+    .first();
+  if (live) return json({ ok: true, trial: publicTrial(live), reused: true });
+
+  const used = await env.DB.prepare('SELECT COUNT(*) AS n FROM trials WHERE ip_hash = ? AND created_at > ?')
+    .bind(ipHash, t - windowDays * 86400)
+    .first();
+  if (used && used.n >= max) {
+    return fail('Бесплатный пробный доступ уже выдавался ' + max + ' раза. Оформите подписку, чтобы пользоваться VPN дальше.', 403);
+  }
+
+  const id = randHex(16);
+  const name = 'tr_' + randHex(5);
+  const expiresAt = t + TRIAL_SECONDS;
+  let links = [];
+  let sub = null;
+  try {
+    const ids = await enabledInboundIds(env);
+    const res = await panel(env, 'POST', '/api/create', {
+      name,
+      days: 1,
+      expires_at: expiresAt,
+      traffic_limit_gb: TRIAL_GB,
+      device_limit: 1,
+      manual: true,
+      channels: [],
+      inbound_ids: ids,
+    });
+    if (!res.ok) throw new Error(res.error);
+    const client = res.data.client || res.data;
+    links = (client.inbound_links || []).map((l) => l.link).filter(Boolean);
+    sub = client.sub_url || null;
+    if (!links.length && !sub) throw new Error('panel returned no links');
+  } catch (e) {
+    return fail('Не удалось выдать пробный доступ: ' + (e && e.message ? e.message : e), 502);
+  }
+
+  await env.DB.prepare('INSERT INTO trials (id, ip_hash, client_name, sub_url, links, created_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, ipHash, name, sub, JSON.stringify(links), t, expiresAt, 'active')
+    .run();
+
+  return json({ ok: true, trial: { id, status: 'active', expires_at: expiresAt, seconds: TRIAL_SECONDS, traffic_gb: TRIAL_GB, sub_url: sub, links } });
+}
+
+async function readTrial(env, id) {
+  if (!/^[a-f0-9]{16,64}$/.test(id || '')) return fail('Пробный доступ не найден', 404);
+  const row = await env.DB.prepare('SELECT * FROM trials WHERE id = ?').bind(id).first();
+  if (!row) return fail('Пробный доступ не найден', 404);
+  if (row.status === 'active' && row.expires_at <= now()) {
+    await env.DB.prepare("UPDATE trials SET status = 'expired' WHERE id = ?").bind(id).run();
+    row.status = 'expired';
+  }
+  return json({ ok: true, trial: publicTrial(row) });
 }
 
 function adminAuth(req, env) {
@@ -398,6 +514,18 @@ async function handle(req, env) {
     return json({ ok: true, tariffs: tariffs(env) });
   }
 
+  if (req.method === 'GET' && path === '/api/rates') {
+    return json({ ok: true, ...(await ratesPayload(env)) });
+  }
+
+  if (req.method === 'POST' && path === '/api/trial') {
+    return createTrial(env, req);
+  }
+
+  if (req.method === 'GET' && path.startsWith('/api/trial/')) {
+    return readTrial(env, path.slice('/api/trial/'.length));
+  }
+
   if (req.method === 'POST' && path === '/api/orders') {
     const body = await req.json().catch(() => null);
     if (!body) return fail('bad json');
@@ -405,7 +533,14 @@ async function handle(req, env) {
   }
 
   if (req.method === 'GET' && path.startsWith('/api/orders/')) {
-    return readOrder(env, path.slice('/api/orders/'.length));
+    const orderId = path.slice('/api/orders/'.length);
+    if (orderId.endsWith('/phone')) {
+      const order = await getOrder(env, orderId.slice(0, -('/phone'.length)));
+      if (!order || order.method !== 'sbp') return fail('Заказ не найден', 404);
+      if (!env.SBP_PHONE) return fail('СБП временно недоступен', 503);
+      return json({ ok: true, phone: env.SBP_PHONE });
+    }
+    return readOrder(env, orderId);
   }
 
   if (req.method === 'POST' && path === '/api/webhook/cryptobot') {
@@ -437,7 +572,8 @@ async function handle(req, env) {
 
     if (req.method === 'GET' && path === '/api/admin/orders') {
       const rows = await env.DB.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT 200').all();
-      return json({ ok: true, orders: rows.results || [] });
+      const trials = await env.DB.prepare('SELECT * FROM trials ORDER BY created_at DESC LIMIT 100').all();
+      return json({ ok: true, orders: rows.results || [], trials: trials.results || [] });
     }
 
     if (req.method === 'POST' && path === '/api/admin/confirm') {

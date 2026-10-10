@@ -38,6 +38,7 @@ function d1(db) {
 function freshDb() {
   const db = new DatabaseSync(':memory:');
   db.exec(readFileSync(join(HERE, '..', 'migrations', '0001_init.sql'), 'utf8'));
+  db.exec(readFileSync(join(HERE, '..', 'migrations', '0002_trials.sql'), 'utf8'));
   return db;
 }
 
@@ -66,6 +67,9 @@ function mockFetch() {
       if (u.pathname === '/api/create') {
         assert.ok(body.days > 0);
         assert.deepEqual(body.inbound_ids, ['ib_1']);
+        if (body.expires_at !== undefined) {
+          assert.ok(body.expires_at > Math.floor(Date.now() / 1000), 'expires_at is a future unix timestamp');
+        }
         return J({
           client: {
             inbound_links: [{ link: 'vless://a' }, { link: 'vless://b' }],
@@ -171,6 +175,12 @@ test('sbp order never leaks the phone and admin confirm delivers links', async (
     const polled = await (await worker.fetch(req('/api/orders/' + created.order.id), e)).json();
     assert.equal(polled.order.status, 'delivered');
     assert.equal(polled.order.links.length, 2);
+
+    // The phone stays off the page; it is only handed out on an explicit
+    // request keyed by the secret order id.
+    const phone = await (await worker.fetch(req('/api/orders/' + created.order.id + '/phone'), e)).json();
+    assert.equal(phone.ok, true);
+    assert.equal(phone.phone, '+79048269897');
   } finally {
     restore();
   }
@@ -264,4 +274,72 @@ test('qr svg renders a scannable-looking matrix for the phone payload', async ()
   assert.ok(count >= 21, 'qr has at least version 1 size');
   assert.equal(qr.isDark(0, 0), true, 'finder pattern corner is dark');
   assert.equal(qr.isDark(0, 7), false, 'quiet separator around finder is light');
+});
+
+test('rates expose the usdt price per tariff with 6 decimals', async () => {
+  const restore = mockFetch();
+  try {
+    const res = await worker.fetch(req('/api/rates'), env(freshDb()));
+    const data = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(data.usd_rub, 90);
+    assert.equal(data.markup, 1.05);
+    const m1 = data.samples.find((s) => s.id === 'm1');
+    assert.equal(m1.usdt, '1.166667'); // 100 * 1.05 / 90
+    const m3 = data.samples.find((s) => s.id === 'm3');
+    assert.equal(m3.usdt, '3.500000'); // 300 * 1.05 / 90
+  } finally {
+    restore();
+  }
+});
+
+test('trial issues a 20 min / 1 GB client, reuses a live trial, and caps at 2', async () => {
+  const restore = mockFetch();
+  try {
+    const e = env(freshDb());
+    const first = await (await worker.fetch(req('/api/trial', { method: 'POST' }), e)).json();
+    assert.equal(first.ok, true);
+    assert.equal(first.trial.status, 'active');
+    assert.equal(first.trial.seconds, 1200);
+    assert.equal(first.trial.traffic_gb, 1);
+    assert.deepEqual(first.trial.links, ['vless://a', 'vless://b']);
+    assert.ok(first.trial.expires_at > Math.floor(Date.now() / 1000) + 1100);
+
+    const again = await (await worker.fetch(req('/api/trial', { method: 'POST' }), e)).json();
+    assert.equal(again.ok, true);
+    assert.equal(again.reused, true);
+    assert.equal(again.trial.id, first.trial.id, 'a live trial is returned, not duplicated');
+
+    // Expire both trials in the DB; a third issue must be rejected.
+    e.DB.prepare("UPDATE trials SET status = 'expired', expires_at = ?").bind(Math.floor(Date.now() / 1000) - 10).run();
+    const second = await (await worker.fetch(req('/api/trial', { method: 'POST' }), e)).json();
+    assert.equal(second.ok, true);
+    assert.notEqual(second.trial.id, first.trial.id);
+    e.DB.prepare("UPDATE trials SET status = 'expired', expires_at = ?").bind(Math.floor(Date.now() / 1000) - 10).run();
+    const third = await worker.fetch(req('/api/trial', { method: 'POST' }), e);
+    assert.equal(third.status, 403);
+    const thirdBody = await third.json();
+    assert.match(thirdBody.error, /дважды|2 раза/);
+
+    const read = await (await worker.fetch(req('/api/trial/' + first.trial.id), e)).json();
+    assert.equal(read.trial.status, 'expired');
+  } finally {
+    restore();
+  }
+});
+
+test('trial is blocked while a paid subscription from the same ip is live', async () => {
+  const restore = mockFetch();
+  try {
+    const e = env(freshDb());
+    const created = await (await worker.fetch(req('/api/orders', { method: 'POST', body: { tariff: 'm1', method: 'sbp' } }), e)).json();
+    await worker.fetch(req('/api/admin/confirm', { method: 'POST', body: { id: created.order.id }, headers: { 'x-admin-token': 'admin-secret' } }), e);
+
+    const blocked = await worker.fetch(req('/api/trial', { method: 'POST' }), e);
+    assert.equal(blocked.status, 403);
+    const body = await blocked.json();
+    assert.match(body.error, /платная подписка/i);
+  } finally {
+    restore();
+  }
 });

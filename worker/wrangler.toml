@@ -29,6 +29,12 @@ ORDER_TTL = "3600"
 # Orders per IP per hour when creating an order.
 RATE_LIMIT = "10"
 
+# Free trial: 20 minutes / 1 GB per issue, at most TRIAL_MAX times per IP within
+# TRIAL_WINDOW_DAYS; blocked while a paid subscription from the same IP is live.
+TRIAL_MAX = "2"
+TRIAL_WINDOW_DAYS = "30"
+TRIAL_RATE_LIMIT = "5"
+
 # Secrets (npx wrangler secret put <NAME> --config wrangler.toml):
 #   CRYPTOBOT_TOKEN  — Crypto Pay API token (from @CryptoBot -> Crypto Pay)
 #   PANEL_TOKEN      — H1 panel Bearer token

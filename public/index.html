@@ -28,8 +28,8 @@
     if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
   } catch (e) {}
 </script>
-<link rel="stylesheet" href="style.css?v=1">
-<script src="app.js?v=1" defer></script>
+<link rel="stylesheet" href="style.css?v=2">
+<script src="app.js?v=2" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -57,6 +57,56 @@
       <h2 class="section-title">Тарифы</h2>
       <div class="tariffs" id="tariffs">
         <p class="mute">Загружаем тарифы…</p>
+      </div>
+
+      <div class="trial-banner rise" id="trial-banner">
+        <div class="trial-text">
+          <h3>Сначала попробовать?</h3>
+          <p class="mute">Бесплатный доступ на <b>20 минут</b> и <b>1 ГБ</b> — проверить скорость и оплату.
+          Выдаётся максимум 2 раза и недоступен, пока активна платная подписка.</p>
+        </div>
+        <button class="btn trial-btn" id="trial-btn" type="button">Попробовать бесплатно</button>
+      </div>
+
+      <h2 class="section-title">Как оплатить</h2>
+      <div class="tabs" id="pay-tabs" role="tablist">
+        <button class="tab active" data-tab="crypto" type="button" role="tab">CryptoBot</button>
+        <button class="tab" data-tab="sbp" type="button" role="tab">СБП</button>
+      </div>
+
+      <div class="tab-panel rise" data-panel="crypto">
+        <ol class="steps">
+          <li><b>Купите USDT</b> на любой бирже с P2P (Bybit, OKX и т.п.) — на тариф нужно <b id="usdt-hint">≈ 1.07 USDT</b>.
+          Точный расчёт смотрите в таблице и калькуляторе ниже.</li>
+          <li>Вернитесь на сайт и нажмите <b>CryptoBot</b> на нужном тарифе — откроется счёт в Telegram.</li>
+          <li>Оплатите счёт кнопкой Pay. <b>Ключи появятся на этой же странице автоматически</b> — можно ничего не делать, просто подождать.</li>
+        </ol>
+        <div class="calc">
+          <label class="calc-label" for="calc-rub">Бюджет, ₽
+            <input class="calc-input" type="number" id="calc-rub" min="1" step="1" value="100" inputmode="numeric">
+          </label>
+          <div class="calc-result">
+            ≈ <b id="calc-usdt">…</b> USDT
+            <small class="mute" id="calc-note">курс ЦБ загружается…</small>
+          </div>
+        </div>
+        <div class="rates-wrap">
+          <table class="rates-table" id="rates-table">
+            <thead><tr><th>Тариф</th><th>Цена</th><th>Нужно USDT</th></tr></thead>
+            <tbody><tr><td colspan="3" class="mute">Загружаем курс…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-panel rise" data-panel="sbp" hidden>
+        <ol class="steps">
+          <li>Нажмите <b>СБП</b> на нужном тарифе — откроется страница платежа с QR-кодом.</li>
+          <li>Отсканируйте QR <b>камерой телефона</b> или через «Платежи → QR» в приложении банка.
+          Номер получателя на сайте не показывается — он зашит в QR.</li>
+          <li>Введите точную сумму и комментарий <b>VL-XXXXXX</b> со страницы платежа — без комментария перевод не опознаётся.</li>
+          <li>После подтверждения (обычно до 2 минут) ключи появятся на странице.
+          Если камера не читает QR — на странице платежа есть кнопка «Показать номер».</li>
+        </ol>
       </div>
 
       <h2 class="section-title">Как это работает</h2>
