@@ -1,0 +1,19 @@
+{
+  "name": "vpnlab-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VPNLAB API — Cloudflare Worker, D1 orders, CryptoBot + SBP, H1 panel issuance",
+  "scripts": {
+    "dev": "wrangler dev --config wrangler.toml",
+    "deploy": "wrangler deploy --config wrangler.toml",
+    "db:create": "wrangler d1 create vpnlab --config wrangler.toml",
+    "db:migrate": "wrangler d1 migrations apply vpnlab --remote --config wrangler.toml",
+    "db:migrate:local": "wrangler d1 migrations apply vpnlab --local --config wrangler.toml",
+    "tail": "wrangler tail --config wrangler.toml",
+    "test": "node --test test/worker.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

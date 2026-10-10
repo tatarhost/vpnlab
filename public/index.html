@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- GitHub Pages serves this project from https://tatarhost.github.io/vpnlab/,
+     so the app root is a subpath. <base> makes relative assets resolve
+     correctly from any depth. Deploy under a domain root instead? Delete. -->
+<base href="/vpnlab/">
+
+<title>VPNLAB — VPN-подписка с оплатой криптой и СБП</title>
+<meta name="description" content="VPNLAB — подписка на быстрый VPN: VLESS + Reality. Оплата через CryptoBot или СБП. Клиент и ключи выдаются автоматически после оплаты.">
+
+<!-- API origin. Empty means same origin. Set the workers.dev URL with
+     `node scripts/set-api-url.mjs <url>` once the Worker is deployed. -->
+<meta name="vpnlab-api" content="https://vpnlab.tatarhost.workers.dev">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="VPNLAB">
+<meta property="og:title" content="VPNLAB — VPN-подписка с оплатой криптой и СБП">
+<meta property="og:description" content="VLESS + Reality. Оплата криптой или СБП, ключи приходят автоматически.">
+<meta name="theme-color" content="#0b0b0b">
+<link rel="icon" href="assets/logo.png">
+<script>
+  try {
+    var t = localStorage.getItem('vpnlab.theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="style.css?v=1">
+<script src="app.js?v=1" defer></script>
+</head>
+<body>
+<div class="shell">
+
+  <header class="top">
+    <a class="brand" href="./">
+      <img src="assets/logo.png" alt="" width="28" height="28">
+      <span class="brand-name">VPNLAB</span>
+    </a>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Сменить тему">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+      <span id="theme-label">тема</span>
+    </button>
+  </header>
+
+  <main class="main">
+
+    <section id="view-catalog">
+      <div class="hero">
+        <h1>VPN-подписка<br>за пару минут</h1>
+        <p class="lead">VLESS + Reality, безлимитный трафик. Оплата криптой или СБП.
+        Клиент с рабочими ключами выдаётся автоматически сразу после оплаты — прямо на этой странице.</p>
+      </div>
+
+      <h2 class="section-title">Тарифы</h2>
+      <div class="tariffs" id="tariffs">
+        <p class="mute">Загружаем тарифы…</p>
+      </div>
+
+      <h2 class="section-title">Как это работает</h2>
+      <div class="faq">
+        <div class="faq-item">
+          <h3>Как получить доступ?</h3>
+          <p>Выберите тариф, оплатите счёт — на этой же странице появятся ссылка-подписка и готовые ключи для клиента. Ничего писать не нужно.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Во что подключаться?</h3>
+          <p>Hiddify, v2rayN, Streisand, NekoBox, Karing — любой клиент с поддержкой VLESS / Reality. Ссылку и подписку можно скопировать в один клик.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Почему при оплате СБП нет номера?</h3>
+          <p>Номер не показывается на сайте: сканируйте QR камерой приложения банка. Сумма и комментарий к переводу отдельно на странице.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-order" hidden>
+      <button class="ghost back" id="back" type="button">
+        <svg class="i i-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+        К тарифам
+      </button>
+      <div class="order-head">
+        <span class="badge" id="o-status"></span>
+        <h1 id="o-title"></h1>
+        <p class="mute" id="o-sub"></p>
+      </div>
+      <div id="o-body"></div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span>VPNLAB · оплата через CryptoBot и СБП · ключи выдаются автоматически</span>
+  </footer>
+
+</div>
+</body>
+</html>

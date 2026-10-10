@@ -1,0 +1,39 @@
+name = "vpnlab"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vpnlab"
+database_id = "PLACEHOLDER_RUN_db_create"
+migrations_dir = "migrations"
+
+[vars]
+# Static site on GitHub Pages. Used for CORS and payment success redirects.
+SITE_URL = "https://tatarhost.github.io/vpnlab"
+ALLOW_ORIGIN = "*"
+
+# H1 panel. The token is a secret (see below), the URL is public.
+PANEL_URL = "http://de13.h1cloud.net:25844"
+
+# Tariffs: unlimited traffic, every inbound of the panel, prices with the
+# discount already applied. "rub" drives both payment methods; the USDT price
+# is rub * USDT_MARKUP / usd_rate (CBR, cached) rounded up to 2 decimals.
+TARIFFS = '[{"id":"m1","label":"1 месяц","days":30,"rub":100,"old":150},{"id":"m2","label":"2 месяца","days":60,"rub":150,"old":200},{"id":"m3","label":"3 месяца","days":90,"rub":300,"old":350},{"id":"y1","label":"12 месяцев","days":365,"rub":800,"old":1000}]'
+USDT_MARKUP = "1.05"
+USD_FALLBACK = "90"
+
+# Orders older than this stop being payable (seconds).
+ORDER_TTL = "3600"
+# Orders per IP per hour when creating an order.
+RATE_LIMIT = "10"
+
+# Secrets (npx wrangler secret put <NAME> --config wrangler.toml):
+#   CRYPTOBOT_TOKEN  — CryptoBot API token
+#   PANEL_TOKEN      — H1 panel Bearer token
+#   SBP_PHONE        — recipient phone, never sent to the browser
+#   ADMIN_TOKEN      — X-Admin-Token for /api/admin/*
+
+[observability]
+enabled = true
