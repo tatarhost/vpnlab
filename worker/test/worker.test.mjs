@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash, createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -41,9 +42,14 @@ function freshDb() {
 }
 
 const PANEL_URL = 'http://panel.test';
-const CRYPTO = 'https://api.crypto.bot';
+const CRYPTO = 'https://pay.crypt.bot';
 
-let cryptoState = { paid: false, invoices: true };
+let cryptoState = { paid: false, invoices: true, lastPayload: null };
+
+function paySignature(token, raw) {
+  const secret = createHash('sha256').update(token).digest();
+  return createHmac('sha256', secret).update(raw).digest('hex');
+}
 
 function mockFetch() {
   const real = globalThis.fetch;
@@ -71,14 +77,19 @@ function mockFetch() {
     }
 
     if (u.origin === CRYPTO) {
-      if (u.pathname === '/api/newInvoice') {
-        assert.equal(body.currency, 'USDT');
-        assert.ok(body.amount >= 1);
-        return J({ ok: true, result: { invoice_id: 42, bot_invoice_url: 'https://pay.test/inv' } });
+      if (u.pathname === '/api/createInvoice') {
+        assert.equal(body.asset, 'USDT');
+        assert.equal(body.currency_type, 'crypto');
+        assert.equal(typeof body.amount, 'string');
+        assert.ok(parseFloat(body.amount) >= 1);
+        assert.ok(body.payload);
+        cryptoState.lastPayload = body.payload;
+        return J({ ok: true, result: { invoice_id: 42, bot_invoice_url: 'https://pay.test/inv', payload: body.payload } });
       }
       if (u.pathname === '/api/getInvoices') {
-        if (!cryptoState.invoices) return J({ ok: true, result: { items: [] } });
-        return J({ ok: true, result: { items: [{ order_id: body.order_ids, status: cryptoState.paid ? 'paid' : 'active' }] } });
+        assert.ok(body.invoice_ids, 'getInvoices is queried by invoice_ids');
+        if (!cryptoState.invoices) return J({ ok: true, result: [] });
+        return J({ ok: true, result: [{ invoice_id: 42, payload: cryptoState.lastPayload, status: cryptoState.paid ? 'paid' : 'active' }] });
       }
       return J({ ok: false, error: { message: 'unknown crypto route' } }, 404);
     }
@@ -178,11 +189,17 @@ test('cryptobot order settles through the verified invoice status and delivers',
     const pending = await (await worker.fetch(req('/api/orders/' + created.order.id), e)).json();
     assert.equal(pending.order.status, 'pending');
 
-    // A forged webhook with no matching paid invoice must not mark the order paid.
-    const forged = await worker.fetch(req('/api/webhook/cryptobot', { method: 'POST', body: { update_type: 'invoice_paid', payload: { order_id: created.order.id } } }), e);
-    assert.equal(forged.status, 200);
-    const afterForged = await (await worker.fetch(req('/api/orders/' + created.order.id), e)).json();
-    assert.equal(afterForged.order.status, 'pending');
+    // An unsigned webhook must be rejected, and even a correctly signed one
+    // must not mark the order paid while Crypto Pay still reports the invoice
+    // as active (the worker re-verifies through the API).
+    const hookBody = JSON.stringify({ update_type: 'invoice_paid', payload: { invoice_id: 42, payload: created.order.id, status: 'paid' } });
+    const hookUrl = 'https://worker.test/api/webhook/cryptobot';
+    const unsigned = await worker.fetch(new Request(hookUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: hookBody }), e);
+    assert.equal(unsigned.status, 401);
+    const signed = await worker.fetch(new Request(hookUrl, { method: 'POST', headers: { 'content-type': 'application/json', 'crypto-pay-api-signature': paySignature('crypto-secret', hookBody) }, body: hookBody }), e);
+    assert.equal(signed.status, 200);
+    const afterHook = await (await worker.fetch(req('/api/orders/' + created.order.id), e)).json();
+    assert.equal(afterHook.order.status, 'pending');
 
     cryptoState.paid = true;
     const settled = await (await worker.fetch(req('/api/orders/' + created.order.id), e)).json();

@@ -30,10 +30,13 @@ ORDER_TTL = "3600"
 RATE_LIMIT = "10"
 
 # Secrets (npx wrangler secret put <NAME> --config wrangler.toml):
-#   CRYPTOBOT_TOKEN  — CryptoBot API token
+#   CRYPTOBOT_TOKEN  — Crypto Pay API token (from @CryptoBot -> Crypto Pay)
 #   PANEL_TOKEN      — H1 panel Bearer token
 #   SBP_PHONE        — recipient phone, never sent to the browser
 #   ADMIN_TOKEN      — X-Admin-Token for /api/admin/*
+#
+# Optional var: CRYPTOBOT_API overrides the Crypto Pay base URL
+# (default https://pay.crypt.bot/api per the official docs).
 
 [observability]
 enabled = true

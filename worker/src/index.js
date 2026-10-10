@@ -109,9 +109,8 @@ async function enabledInboundIds(env) {
 function cryptoBotBases(env) {
   const bases = [];
   if (env.CRYPTOBOT_API) bases.push(env.CRYPTOBOT_API.replace(/\/+$/, ''));
-  for (const b of ['https://api.crypto.bot/api', 'https://api.cryptobot.ru/api']) {
-    if (!bases.includes(b)) bases.push(b);
-  }
+  const doc = 'https://pay.crypt.bot/api';
+  if (!bases.includes(doc)) bases.push(doc);
   return bases;
 }
 
@@ -255,11 +254,28 @@ async function deliver(env, order) {
 }
 
 async function invoiceInfo(env, order) {
-  const res = await cryptoBot(env, 'getInvoices', { order_ids: order.id });
+  const params = order.invoice_id ? { invoice_ids: String(order.invoice_id), count: 1 } : { count: 100 };
+  const res = await cryptoBot(env, 'getInvoices', params);
   if (!res.ok) return undefined;
   const result = res.result;
   const items = Array.isArray(result) ? result : (result && result.items) || [];
-  return items.find((i) => i && (i.order_id === order.id || i.payload === order.id)) || null;
+  return items.find((i) => i && (String(i.payload || '') === order.id || String(i.invoice_id) === String(order.invoice_id))) || null;
+}
+
+// Crypto Pay signs the raw request body with HMAC-SHA-256 whose key is the
+// SHA-256 of the app token; the hex digest arrives in crypto-pay-api-signature.
+async function verifyPaySignature(token, rawBody, signature) {
+  if (!token || !rawBody || !signature) return false;
+  const enc = new TextEncoder();
+  const secret = await crypto.subtle.digest('SHA-256', enc.encode(token));
+  const key = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = await crypto.subtle.sign('HMAC', key, enc.encode(rawBody));
+  const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const given = String(signature).trim().toLowerCase();
+  if (hex.length !== given.length) return false;
+  let diff = 0;
+  for (let i = 0; i < hex.length; i++) diff |= hex.charCodeAt(i) ^ given.charCodeAt(i);
+  return diff === 0;
 }
 
 async function settle(env, order) {
@@ -313,21 +329,24 @@ async function createOrder(env, req, body) {
   if (method === 'cryptobot') {
     if (!env.CRYPTOBOT_TOKEN) return fail('Оплата временно недоступна', 503);
     order.usdt = await usdtAmount(env, tariff.rub);
-    const successUrl = (env.SITE_URL || '').replace(/\/+$/, '') + '/?o=' + id;
-    const inv = await cryptoBot(env, 'newInvoice', {
-      amount: parseFloat(order.usdt),
-      currency: 'USDT',
-      order_id: id,
-      payload: id,
+    const site = (env.SITE_URL || '').replace(/\/+$/, '');
+    const orderUrl = site + '/?o=' + id;
+    const inv = await cryptoBot(env, 'createInvoice', {
+      currency_type: 'crypto',
+      asset: 'USDT',
+      amount: order.usdt,
       description: 'VPNLAB ' + tariff.label + ' · заказ ' + short,
-      success_url: successUrl,
+      payload: id,
+      paid_btn_name: 'callback',
+      paid_btn_url: orderUrl,
+      hidden_message: 'Заказ ' + short + ' на сайте VPNLAB. Вернитесь на страницу заказа, чтобы получить ключи.',
       expires_in: parseInt(env.ORDER_TTL || '3600', 10),
     });
     if (!inv.ok) return fail('Не удалось создать счёт: ' + inv.error, 502);
     const invoice = inv.result || {};
     order.invoice_id = String(invoice.invoice_id || invoice.id || '');
-    order.invoice_url = invoice.bot_invoice_url || invoice.pay_url || invoice.url || null;
-    if (!order.invoice_url) return fail('CryptoBot не вернул ссылку на оплату', 502);
+    order.invoice_url = invoice.bot_invoice_url || invoice.web_app_invoice_url || invoice.mini_app_invoice_url || invoice.pay_url || null;
+    if (!order.invoice_url) return fail('Crypto Pay не вернул ссылку на оплату', 502);
   }
 
   await env.DB.prepare(
@@ -390,17 +409,22 @@ async function handle(req, env) {
   }
 
   if (req.method === 'POST' && path === '/api/webhook/cryptobot') {
-    const body = await req.json().catch(() => null);
-    const payload = (body && (body.payload || body)) || {};
-    const orderId = payload.order_id || payload.payload;
-    if (orderId) {
-      const order = await getOrder(env, orderId);
-      if (order && order.status === 'pending' && order.method === 'cryptobot') {
-        const settled = await settle(env, order);
-        if (settled.status === 'paid') {
-          try {
-            await deliver(env, settled);
-          } catch {}
+    const raw = await req.text().catch(() => '');
+    const valid = await verifyPaySignature(env.CRYPTOBOT_TOKEN, raw, req.headers.get('crypto-pay-api-signature'));
+    if (!valid) return fail('bad signature', 401);
+    const body = parseJson(raw, null);
+    if (body && body.update_type === 'invoice_paid') {
+      const invoice = (body.payload || {}) || {};
+      const orderId = invoice.payload;
+      if (orderId) {
+        const order = await getOrder(env, orderId);
+        if (order && order.status === 'pending' && order.method === 'cryptobot') {
+          const settled = await settle(env, order);
+          if (settled.status === 'paid') {
+            try {
+              await deliver(env, settled);
+            } catch {}
+          }
         }
       }
     }
