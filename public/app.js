@@ -16,7 +16,6 @@
   const calcNote = document.getElementById('calc-note');
   const ratesBody = document.querySelector('#rates-table tbody');
   const usdtHint = document.getElementById('usdt-hint');
-  const payTabs = document.getElementById('pay-tabs');
 
   const STATUS = {
     pending: { label: 'ожидает оплаты', cls: 'wait' },
@@ -385,21 +384,6 @@
   }
 
   calcRub.addEventListener('input', updateCalc);
-
-  payTabs.addEventListener('click', (e) => {
-    const tab = e.target.closest('.tab');
-    if (!tab) return;
-    payTabs.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-    document.querySelectorAll('.tab-panel').forEach((p) => {
-      const on = p.dataset.panel === tab.dataset.tab;
-      p.hidden = !on;
-      if (on) {
-        p.classList.remove('rise');
-        void p.offsetWidth;
-        p.classList.add('rise');
-      }
-    });
-  });
 
   // ---- wiring ----
 
